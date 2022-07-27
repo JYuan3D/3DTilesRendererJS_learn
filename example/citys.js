@@ -5,19 +5,19 @@ import { GUI } from "three/examples/jsm/libs/lil-gui.module.min.js";
 
 // 已学习
 
-const groundUrl =
-	"https://raw.githubusercontent.com/NASA-AMMOS/3DTilesSampleData/master/msl-dingo-gap/0528_0260184_to_s64o256_colorize/0528_0260184_to_s64o256_colorize/0528_0260184_to_s64o256_colorize_tileset.json";
-
-const skyUrl =
-	"https://raw.githubusercontent.com/NASA-AMMOS/3DTilesSampleData/master/msl-dingo-gap/0528_0260184_to_s64o256_colorize/0528_0260184_to_s64o256_sky/0528_0260184_to_s64o256_sky_tileset.json";
+const groundUrl = "http://202.104.149.202:8099/BSQ/Scene_New/3DTiles.json";
 
 let camera, controls, scene, renderer;
-let groundTiles, skyTiles;
+let tilesParent;
+let groundTiles;
 
 const params = {
 	errorTarget: 12,
 	displayBoxBounds: false,
 	fog: false,
+	x: -0.54, // -0.5, -0.58, -0.81
+	y: -0.73,
+	z: -0.81
 };
 
 init();
@@ -43,7 +43,7 @@ function init() {
 		60,
 		window.innerWidth / window.innerHeight,
 		1,
-		4000
+		100000
 	);
 	camera.position.set(0, 100, 200);
 
@@ -57,7 +57,7 @@ function init() {
 	controls.fastSpeed = 0.2;
 
 	// lights
-	const dirLight = new THREE.DirectionalLight(0xffffff, 1.25);
+	const dirLight = new THREE.DirectionalLight(0xffffff, 3);
 	dirLight.position.set(1, 2, 3).multiplyScalar(40);
 	dirLight.castShadow = true;
 	dirLight.shadow.bias = -0.01;
@@ -75,8 +75,11 @@ function init() {
 	shadowCamHelper.name = `dirLight_helper`;
 	scene.add(shadowCamHelper);
 
-	const ambLight = new THREE.AmbientLight(0xffffff, 1);
-	// scene.add(ambLight);
+	const ambLight = new THREE.AmbientLight(0xffffff, 0.5);
+	scene.add(ambLight);
+
+	const axesHelper = new THREE.AxesHelper(50);
+	scene.add(axesHelper);
 
 	// 参照物
 	let torusKnotGGeometry = new THREE.TorusKnotGeometry(25, 8, 75, 20);
@@ -93,7 +96,7 @@ function init() {
 	scene.add(torusKnot3D);
 
 	// 平面
-	const geometry = new THREE.PlaneGeometry(30, 30);
+	const geometry = new THREE.PlaneGeometry(300, 300);
 	const material = new THREE.MeshStandardMaterial({
 		color: 0xefe7b0,
 		metalness: 0.0,
@@ -107,8 +110,8 @@ function init() {
 	ground.receiveShadow = true;
 	scene.add(ground);
 
-	const tilesParent = new THREE.Group();
-	tilesParent.rotation.set(Math.PI / 2, 0, 0);
+	tilesParent = new THREE.Group();
+	tilesParent.rotation.set(-0.5, -0.58, -0.81);
 	scene.add(tilesParent);
 
 	groundTiles = new TilesRenderer(groundUrl);
@@ -120,22 +123,21 @@ function init() {
 		scene.traverse((c) => {
 			if (c.isMesh) {
 				var prevMaterial = c.material;
-				c.material = new THREE.MeshStandardMaterial();
-				THREE.MeshBasicMaterial.prototype.copy.call(c.material, prevMaterial);
+				c.material = new THREE.MeshPhongMaterial();
+				THREE.MeshStandardMaterial.prototype.copy.call(c.material, prevMaterial);
 				// 请注意，上述操作反过来出来反而不行，因为copy在更简单的材质中（如MeshBasicMaterial）上调用复杂材质的方法将导致它查找不到不存在的属性
-				// c.material.side = THREE.DoubleSide
+				c.material.side = THREE.DoubleSide;
+				console.log("[c.material]", c.material);
 				c.castShadow = true;
 				c.receiveShadow = true;
 			}
 		});
 	};
 
-	skyTiles = new TilesRenderer(skyUrl);
-	skyTiles.fetchOptions.mode = "cors";
-	skyTiles.lruCache.minSize = 900;
-	skyTiles.lruCache.maxSize = 1300;
+	groundTiles.setCamera(camera);
+	groundTiles.setResolutionFromRenderer(camera, renderer);
 
-	tilesParent.add(groundTiles.group, skyTiles.group);
+	tilesParent.add(groundTiles.group);
 
 	onWindowResize();
 	window.addEventListener("resize", onWindowResize, false);
@@ -147,6 +149,17 @@ function init() {
 
 	gui.add(params, "displayBoxBounds");
 	gui.add(params, "errorTarget", 0, 100);
+	gui.add(params, "x", -Math.PI / 2, Math.PI / 2, 0.01).onChange((v) => {
+		tilesParent.rotation.set(params.x, params.y, params.z);
+	});
+	gui.add(params, "y", -Math.PI / 2, Math.PI / 2, 0.01).onChange((v) => {
+		console.log("y", v);
+		tilesParent.rotation.set(params.x, params.y, params.z);
+	});
+	gui.add(params, "z", -Math.PI / 2, Math.PI / 2, 0.01).onChange((v) => {
+		console.log("z", v);
+		tilesParent.rotation.set(params.x, params.y, params.z);
+	});
 	gui.open();
 }
 
@@ -157,6 +170,8 @@ function onWindowResize() {
 	renderer.setPixelRatio(window.devicePixelRatio);
 }
 
+let box = new THREE.Box3();
+let sphere = new THREE.Sphere();
 function render() {
 	requestAnimationFrame(render);
 
@@ -164,15 +179,18 @@ function render() {
 
 	groundTiles.errorTarget = params.errorTarget;
 	groundTiles.displayBoxBounds = params.displayBoxBounds;
-	skyTiles.displayBoxBounds = params.displayBoxBounds;
+	groundTiles.displaySphereBounds = params.displayBoxBounds;
 
-	groundTiles.setCamera(camera);
-	groundTiles.setResolutionFromRenderer(camera, renderer);
+	// 更新tiles中心
+	if (groundTiles.getBounds(box)) {
+		box.getCenter(groundTiles.group.position);
+		groundTiles.group.position.multiplyScalar(-1);
+	} else if (groundTiles.getBoundingSphere(sphere)) {
+		groundTiles.group.position.copy(sphere.center);
+		groundTiles.group.position.multiplyScalar(-1);
+	}
+
 	groundTiles.update();
-
-	skyTiles.setCamera(camera);
-	skyTiles.setResolutionFromRenderer(camera, renderer);
-	skyTiles.update();
 
 	renderer.render(scene, camera);
 }
